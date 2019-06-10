@@ -1,8 +1,6 @@
 # encoding: utf-8
 require "logstash/inputs/base"
 require "stud/interval"
-require "net/sftp"
-require "net/ssh"
 
 require "socket"
 # Generate a repeating message.
@@ -23,6 +21,7 @@ class LogStash::Inputs::Sftp < LogStash::Inputs::Base
   # The default, `1`, means send a message every second.
   config :interval, :validate => :number, :default => 1
 
+
   #SFTP User Info
   config :username, :validate => :string, :default => "ftpuser"
   config :password, :validate => :string, :default => "ftppass"
@@ -31,7 +30,7 @@ class LogStash::Inputs::Sftp < LogStash::Inputs::Base
   config :remote_host, :validate => :string, :default => "localhost"
 
   # and port number.
-  config :port, :validate => :number, :default => 22
+  config :port, :validate => :number, :default => 2222
 
   # Remote SFTP path and local path
   config :remote_path, :validate => :string, :default => "/ftpuser/upload"
@@ -56,6 +55,9 @@ class LogStash::Inputs::Sftp < LogStash::Inputs::Base
     puts "Run"
 
     while !stop?
+
+      process(queue)
+
       event = LogStash::Event.new("message" => @message, "host" => "Teste")
       decorate(event)
       queue << event
@@ -70,9 +72,7 @@ class LogStash::Inputs::Sftp < LogStash::Inputs::Base
   def process(queue)
     puts "dentro de process"
 
-    Net::SSH.start(@remote_host, @username, :password => @password, :port => @port) do |sftp|
-      puts "entrei aqui"
-    end
+
   end
 
   def stop
