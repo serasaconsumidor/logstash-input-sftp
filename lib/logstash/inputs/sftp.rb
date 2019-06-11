@@ -3,11 +3,9 @@ require "logstash/inputs/base"
 require "stud/interval"
 require "net/sftp"
 require "net/ssh"
-require "socket"
-# Generate a repeating message.
-#
-# This plugin is intented only as an example.
 
+
+# This plugin goal is intented to make a connection with sFTP
 class LogStash::Inputs::Sftp < LogStash::Inputs::Base
   config_name "sftp"
 
@@ -34,31 +32,22 @@ class LogStash::Inputs::Sftp < LogStash::Inputs::Base
   config :port, :validate => :number, :default => 2222
 
   # Remote SFTP path and local path
-  config :remote_path, :validate => :string, :default => "/ftpuser/upload"
+  config :remote_path, :validate => :string, :default => "/upload/ftp"
   config :local_path, :validate => :string, :default => "/Users/szn6549/ftpteste"
 
 
   public
   def register
-    @host = Socket.gethostname
-
-    puts "host", @host
-
-    # we can abort the loop if stop? becomes true
-    # @logger.info("Registering SFTP Input",
-    #          :username => @username, :password => @password,
-    #          :remote_host => @remote_host, :port => @port,
-    #          :remote_path => @remote_path, :local_path => @local_path)
-  end
+    puts "inside register method"
+  end # def register
 
   def run(queue)
 
-    puts "Run"
+    puts "inside run method"
+
+    connect_sftp(queue)
 
     while !stop?
-
-      process(queue)
-
       event = LogStash::Event.new("message" => @message, "host" => "Teste")
       decorate(event)
       queue << event
@@ -70,15 +59,20 @@ class LogStash::Inputs::Sftp < LogStash::Inputs::Base
     end # loop
   end # def run
 
-  def process(queue)
-    puts "dentro de process"
+  def connect_sftp(queue)
 
+    puts "inside connect_sftp"
+
+    # ssh logic to auth algorithm
     Net::SSH::Transport::Algorithms::ALGORITHMS.values.each { |algs| algs.reject! { |a| a =~ /^ecd(sa|h)-sha2/ } }
     Net::SSH::KnownHosts::SUPPORTED_TYPE.reject! { |t| t =~ /^ecd(sa|h)-sha2/ }
     
-    Net::SFTP.start("localhost", "ftpuser", :password => "ftppass", :port => 2222)do |sftp|
-      puts "WORKED"
-    end
+    # connect to sftp with credentials
+    Net::SFTP.start(@remote_host, @username, :password => @password, :port => @port) do |sftp|
+      # download an entire folder
+      puts "inside net start"
+      sftp.download!(@remote_path, @local_path, :recursive => true)
+    end # def connect_sftp
   end
 
   def stop
