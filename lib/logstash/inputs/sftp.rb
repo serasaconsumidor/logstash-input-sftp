@@ -1,9 +1,11 @@
 # encoding: utf-8
+require "logstash/namespace"
 require "logstash/inputs/base"
 require "stud/interval"
 require "net/sftp"
 require "net/ssh"
-
+require "digest/md5"
+require "filewatch/bootstrap"
 
 # This plugin goal is intented to make a connection with sFTP
 class LogStash::Inputs::Sftp < LogStash::Inputs::Base
@@ -20,7 +22,6 @@ class LogStash::Inputs::Sftp < LogStash::Inputs::Base
   # The default, `1`, means send a message every second.
   config :interval, :validate => :number, :default => 1
 
-
   #SFTP User Info
   config :username, :validate => :string, :default => "ftpuser"
   config :password, :validate => :string, :default => "ftppass"
@@ -32,20 +33,48 @@ class LogStash::Inputs::Sftp < LogStash::Inputs::Base
   config :port, :validate => :number, :default => 2222
 
   # Remote SFTP path and local path
-  config :remote_path, :validate => :string, :default => "/upload/ftp"
-  config :local_path, :validate => :string, :default => "/Users/szn6549/ftpteste"
+  config :remote_path, :validate => :string, :default => "/upload/ftp/"
+  config :local_path, :validate => :string, :default => "/Users/szn6549/ftpteste/"
+
+  # sincedb path
+  config :sincedb_path, :validate => :string
+
+  # path to the files to use as input
+  config :path_to_files, :validate => :string, :default => "/Users/szn6549/ftpteste"
 
 
   public
   def register
     puts "inside register method"
+    create_sincedb
   end # def register
+
+  def create_sincedb
+    sincedb_dir = ENV["HOME"]
+
+    @sincedb_file = ".sincedb_" + Digest::MD5.hexdigest(@path_to_files)
+    puts @sincedb_file    
+    @sincedb_path = File.join(sincedb_dir, @sincedb_file)
+    puts @sincedb_path
+
+    FileUtils.touch(@sincedb_path)
+  end # def create_sincedb
+
+  def sincedb_write(file_name)
+    puts "inside sincedb_write"
+    begin
+      db = File.open(@sincedb_path, "a")
+      db.puts(file_name)
+      db.close
+    end
+  end # def sincedb_write
 
   def run(queue)
 
     puts "inside run method"
 
-    connect_sftp(queue)
+    sftp = connect_sftp
+    download_files_from_sftp(sftp)
 
     while !stop?
       event = LogStash::Event.new("message" => @message, "host" => "Teste")
@@ -59,7 +88,7 @@ class LogStash::Inputs::Sftp < LogStash::Inputs::Base
     end # loop
   end # def run
 
-  def connect_sftp(queue)
+  def connect_sftp
 
     puts "inside connect_sftp"
 
@@ -69,11 +98,33 @@ class LogStash::Inputs::Sftp < LogStash::Inputs::Base
     
     # connect to sftp with credentials
     Net::SFTP.start(@remote_host, @username, :password => @password, :port => @port) do |sftp|
-      # download an entire folder
       puts "inside net start"
-      sftp.download!(@remote_path, @local_path, :recursive => true)
+      return sftp       
     end # def connect_sftp
   end
+
+  def download_files_from_sftp(sftp)
+    puts "inside download_files_from_sftp"
+
+    sftp.dir.foreach('/upload/ftp') do |entry| 
+
+      if !entry.name.start_with?(".")
+        puts "inside foreach"
+
+        puts entry.name
+
+        #puts entry.longname 
+        #puts entry.attributes.mtime
+        #puts Time.at(entry.attributes.mtime) 
+
+        sftp.download!(@remote_path + entry.name, @local_path + entry.name)
+        puts "file downloaded"
+
+        sincedb_write(entry.name)
+        puts "file name writed on sincedb"
+      end
+    end
+  end # def download_files_from_sftp
 
   def stop
     # nothing to do in this case so it is not necessary to define stop
