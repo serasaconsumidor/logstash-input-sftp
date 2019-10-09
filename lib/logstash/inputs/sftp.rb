@@ -1,44 +1,103 @@
 # encoding: utf-8
+require "logstash/namespace"
 require "logstash/inputs/base"
 require "stud/interval"
-require "socket" # for Socket.gethostname
+require "net/sftp"
+require "net/ssh"
+require "digest/md5"
+require "filewatch/bootstrap"
 
-# Generate a repeating message.
-#
-# This plugin is intented only as an example.
-
+# This plugin goal is intented to make a connection with sFTP
 class LogStash::Inputs::Sftp < LogStash::Inputs::Base
-  config_name ""
+  config_name "sftp"
 
   # If undefined, Logstash will complain, even if codec is unused.
   default :codec, "plain"
 
-  # The message string to use in the event.
-  config :message, :validate => :string, :default => "Hello World!"
+  #SFTP Credentials
 
-  # Set how frequently messages should be sent.
-  #
-  # The default, `1`, means send a message every second.
-  config :interval, :validate => :number, :default => 1
+  #SFTP User Info
+  config :username, :validate => :string, :required => true
+  config :password, :validate => :string, :required => true
+
+  # SFTP server hostname (or ip address)
+  config :remote_host, :validate => :string, :required => true
+
+  # and port number.
+  config :port, :validate => :number, :required => true
+
+  # Remote SFTP path and local path
+  config :remote_path, :validate => :string, :required => true
+  config :local_path, :validate => :string, :required => true
+
+  # sincedb path
+  config :sincedb_path, :validate => :string
 
   public
+
   def register
-    @host = Socket.gethostname
+    @logger.debug("DEBUG - Inside register method")
+    # call the create .sincedb method
+    create_sincedb
   end # def register
+  
+  def create_sincedb
+    # get params to create the file
+    begin
+      sincedb_dir = ENV["HOME"]
+
+      @sincedb_file = ".sincedb_" + Digest::MD5.hexdigest(@local_path)  
+      @sincedb_path = File.join(sincedb_dir, @sincedb_file)
+
+      FileUtils.touch(@sincedb_path)
+      @logger.info("Sincedb file path" % @sincedb_path)
+    end
+  end
+
+  def sincedb_write(file_name, file_data_downloaded)
+    @logger.debug("DEBUG - Inside sincedb_write")
+    begin
+      db = File.open(@sincedb_path, "a")
+      db.puts([file_name, file_data_downloaded].flatten.join(" "))
+      db.close
+    rescue => e
+      @logger.error("Error in write in .sincedb file", :exception => e)
+    end
+  end # def sincedb_write
 
   def run(queue)
-    # we can abort the loop if stop? becomes true
-    while !stop?
-      event = LogStash::Event.new("message" => @message, "host" => @host)
-      decorate(event)
-      queue << event
-      # because the sleep interval can be big, when shutdown happens
-      # we want to be able to abort the sleep
-      # Stud.stoppable_sleep will frequently evaluate the given block
-      # and abort the sleep(@interval) if the return value is true
-      Stud.stoppable_sleep(@interval) { stop? }
-    end # loop
+    @logger.debug("DEBUG - Inside run method")
+
+    sftp = connect_sftp
+    download_files_from_sftp(sftp)
   end # def run
+
+  def connect_sftp
+    @logger.debug("DEBUG - Inside connect_sftp")
+
+    # ssh logic to auth algorithm
+    Net::SSH::Transport::Algorithms::ALGORITHMS.values.each { |algs| algs.reject! { |a| a =~ /^ecd(sa|h)-sha2/ } }
+    Net::SSH::KnownHosts::SUPPORTED_TYPE.reject! { |t| t =~ /^ecd(sa|h)-sha2/ }
+    
+    # connect to sftp with credentials
+    Net::SFTP.start(@remote_host, @username, :password => @password, :port => @port) do |sftp|
+      return sftp       
+    end # def connect_sftp
+  end
+
+  def download_files_from_sftp(sftp)
+    @logger.debug("DEBUG - Inside download_files_from_sftp")
+    begin
+      sftp.dir.foreach(@remote_path) do |entry| 
+        if !entry.name.start_with?(".")
+          sincedb_write(entry.name, Time.at(entry.attributes.mtime))
+          sftp.download!(@remote_path + entry.name, @local_path + entry.name)
+        end
+      rescue => e
+        @logger.error("Cannot interate, find files or read from sftp folder", :exception => e)
+      end
+    end
+  end # def download_files_from_sftp
 
   def stop
     # nothing to do in this case so it is not necessary to define stop
@@ -47,4 +106,4 @@ class LogStash::Inputs::Sftp < LogStash::Inputs::Base
     #  * cleanup temporary files
     #  * terminate spawned threads
   end
-end # class LogStash::Inputs::Sftp
+end

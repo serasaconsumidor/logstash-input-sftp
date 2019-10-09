@@ -1,0 +1,10 @@
+version: "3.3"
+
+services:
+  sftp:
+    image: atmoz/sftp
+    volumes:
+        - /tmp/:/home/ftpuser/upload
+    ports:
+        - "2222:22"
+    command: ftpuser:ftppass:1001

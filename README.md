@@ -59,6 +59,11 @@ bin/logstash-plugin install --no-verify
 ```sh
 bin/logstash -e 'filter {awesome {}}'
 ```
+- Run Logstash Plugin with .conf file
+```sh
+bin/logstash -f pipeline.conf
+
+```
 At this point any modifications to the plugin code will be applied to this local Logstash setup. After modifying the plugin, simply rerun Logstash.
 
 #### 2.2 Run in an installed Logstash
